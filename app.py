@@ -15,31 +15,28 @@ async def tts(
     text: str = Query(..., max_length=500),
     voice: str = Query("ru-RU-SvetlanaNeural"),
     rate: str = Query("-5%"),
-    volume: str = Query("+0%"),
+    volume: str = Query("+0%"),  # ← ДОЛЖЕН БЫТЬ СТРОКОЙ С %
     pitch: str = Query("+0Hz")
 ):
     allowed_voices = ["ru-RU-SvetlanaNeural", "ru-RU-DmitryNeural"]
     if voice not in allowed_voices:
         voice = "ru-RU-SvetlanaNeural"
 
+    # Убедимся, что volume в правильном формате
+    if not volume.endswith('%'):
+        volume = "+0%"
+
     async def generate():
-        # Добавляем браузерные заголовки
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
-            "Origin": "https://www.bing.com",
-            "Referer": "https://www.bing.com/"
-        }
+        logger.info(f"Генерация: {text[:30]}... | Голос: {voice} | Скорость: {rate} | Громкость: {volume} | Тон: {pitch}")
         
+        # Создаём Communicate с правильными параметрами
         communicate = edge_tts.Communicate(
             text=text,
             voice=voice,
             rate=rate,
-            volume=volume,
-            pitch=pitch,
-            proxy=None  # ← пока без прокси
+            volume=volume,   # ← строка "+0%"
+            pitch=pitch
         )
-        # Устанавливаем заголовки
-        communicate.session.headers.update(headers)
         
         buffer = io.BytesIO()
         audio_chunks = 0
@@ -47,9 +44,11 @@ async def tts(
             if chunk["type"] == "audio" and chunk["data"]:
                 buffer.write(chunk["data"])
                 audio_chunks += 1
+        
         if audio_chunks == 0:
             logger.error("Аудио не сгенерировано")
             return None
+        
         buffer.seek(0)
         return buffer
 
