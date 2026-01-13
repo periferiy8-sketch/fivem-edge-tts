@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Установка git и зависимостей
+# Установка git, curl и аудио-библиотек
 RUN apt-get update && apt-get install -y \
     git \
     curl \
