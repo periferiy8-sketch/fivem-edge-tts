@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import Response
+from fastapi.middleware.cors import CORSMiddleware
 import edge_tts
 import asyncio
 from pydub import AudioSegment
@@ -7,12 +8,19 @@ import io
 
 app = FastAPI()
 
-# === Будильник для UptimeRobot ===
+# CORS — ОБЯЗАТЕЛЬНО для FiveM NUI
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/ping")
 async def ping():
     return {"status": "ok", "message": "pong"}
 
-# === Основной TTS эндпоинт ===
 @app.get("/tts")
 async def tts(
     text: str = Query(..., max_length=500),
@@ -44,24 +52,13 @@ async def tts(
         if mp3_buffer.getbuffer().nbytes == 0:
             raise HTTPException(status_code=500, detail="Empty audio generated")
 
-        # Декодируем MP3 → аудио-объект
+        # Конвертация в WAV (гарантированно совместимо)
         audio = AudioSegment.from_file(mp3_buffer, format="mp3")
+        wav_buffer = io.BytesIO()
+        audio.export(wav_buffer, format="wav")
+        wav_data = wav_buffer.getvalue()
 
-        # Приводим частоту к совместимой с CEF (22050 Гц)
-        if audio.frame_rate not in (22050, 44100):
-            audio = audio.set_frame_rate(22050)
-
-        # Экспорт в OGG с параметрами, совместимыми с FiveM
-        ogg_buffer = io.BytesIO()
-        audio.export(
-            ogg_buffer,
-            format="ogg",
-            codec="libvorbis",
-            bitrate="96k"
-        )
-        ogg_data = ogg_buffer.getvalue()
-
-        return Response(ogg_data, media_type="audio/ogg")
+        return Response(wav_data, media_type="audio/wav")
 
     except Exception as e:
         print(f"TTS error: {e}")
