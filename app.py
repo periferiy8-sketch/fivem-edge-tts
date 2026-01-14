@@ -1,18 +1,22 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import StreamingResponse
 import edge_tts
 import asyncio
-import io
-import os
 
 app = FastAPI()
 
+# === Будильник для UptimeRobot ===
+@app.get("/ping")
+async def ping():
+    return {"status": "ok", "message": "pong"}
+
+# === Основной TTS эндпоинт ===
 @app.get("/tts")
 async def tts(
     text: str = Query(..., max_length=500),
     voice: str = Query("ru-RU-SvetlanaNeural"),
     rate: str = Query("-5%"),
-    volume: str = Query("+0%"),   # Должен быть строкой с %
+    volume: str = Query("+0%"),
     pitch: str = Query("+0Hz")
 ):
     allowed_voices = ["ru-RU-SvetlanaNeural", "ru-RU-DmitryNeural"]
@@ -21,23 +25,21 @@ async def tts(
     if not volume.endswith('%'):
         volume = "+0%"
 
-    async def generate():
-        communicate = edge_tts.Communicate(
-            text=text,
-            voice=voice,
-            rate=rate,
-            volume=volume,
-            pitch=pitch
-        )
-        buffer = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio" and chunk["data"]:
-                buffer.write(chunk["data"])
-        buffer.seek(0)
-        return buffer
+    async def audio_stream():
+        try:
+            communicate = edge_tts.Communicate(
+                text=text,
+                voice=voice,
+                rate=rate,
+                volume=volume,
+                pitch=pitch
+            )
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio" and chunk["data"]:
+                    yield chunk["data"]
+        except Exception as e:
+            # Логируем ошибку (в Render будет в логах)
+            print(f"TTS error: {e}")
+            raise HTTPException(status_code=500, detail="TTS generation failed")
 
-    try:
-        audio = await generate()
-        return StreamingResponse(audio, media_type="audio/mpeg")
-    except Exception as e:
-        return {"error": str(e)}
+    return StreamingResponse(audio_stream(), media_type="audio/mpeg")
