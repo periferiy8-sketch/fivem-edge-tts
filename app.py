@@ -7,10 +7,12 @@ import io
 
 app = FastAPI()
 
+# === Будильник для UptimeRobot ===
 @app.get("/ping")
 async def ping():
     return {"status": "ok", "message": "pong"}
 
+# === Основной TTS эндпоинт ===
 @app.get("/tts")
 async def tts(
     text: str = Query(..., max_length=500),
@@ -26,6 +28,7 @@ async def tts(
         volume = "+0%"
 
     try:
+        # Собираем весь MP3 в буфер (как раньше, но полностью)
         mp3_buffer = io.BytesIO()
         communicate = edge_tts.Communicate(
             text=text,
@@ -42,11 +45,13 @@ async def tts(
         if mp3_buffer.getbuffer().nbytes == 0:
             raise HTTPException(status_code=500, detail="Empty audio generated")
 
+        # Конвертируем MP3 → OGG (новое)
         audio = AudioSegment.from_file(mp3_buffer, format="mp3")
         ogg_buffer = io.BytesIO()
         audio.export(ogg_buffer, format="ogg", codec="libvorbis")
         ogg_data = ogg_buffer.getvalue()
 
+        # Отдаём OGG вместо MP3
         return Response(ogg_data, media_type="audio/ogg")
 
     except Exception as e:
