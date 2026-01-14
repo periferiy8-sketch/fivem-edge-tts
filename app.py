@@ -1,16 +1,16 @@
 from fastapi import FastAPI, Query, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 import edge_tts
 import asyncio
+from pydub import AudioSegment
+import io
 
 app = FastAPI()
 
-# === Будильник для UptimeRobot ===
 @app.get("/ping")
 async def ping():
     return {"status": "ok", "message": "pong"}
 
-# === Основной TTS эндпоинт ===
 @app.get("/tts")
 async def tts(
     text: str = Query(..., max_length=500),
@@ -25,21 +25,30 @@ async def tts(
     if not volume.endswith('%'):
         volume = "+0%"
 
-    async def audio_stream():
-        try:
-            communicate = edge_tts.Communicate(
-                text=text,
-                voice=voice,
-                rate=rate,
-                volume=volume,
-                pitch=pitch
-            )
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio" and chunk["data"]:
-                    yield chunk["data"]
-        except Exception as e:
-            # Логируем ошибку (в Render будет в логах)
-            print(f"TTS error: {e}")
-            raise HTTPException(status_code=500, detail="TTS generation failed")
+    try:
+        mp3_buffer = io.BytesIO()
+        communicate = edge_tts.Communicate(
+            text=text,
+            voice=voice,
+            rate=rate,
+            volume=volume,
+            pitch=pitch
+        )
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio" and chunk["data"]:
+                mp3_buffer.write(chunk["data"])
+        mp3_buffer.seek(0)
 
-    return StreamingResponse(audio_stream(), media_type="audio/mpeg")
+        if mp3_buffer.getbuffer().nbytes == 0:
+            raise HTTPException(status_code=500, detail="Empty audio generated")
+
+        audio = AudioSegment.from_file(mp3_buffer, format="mp3")
+        ogg_buffer = io.BytesIO()
+        audio.export(ogg_buffer, format="ogg", codec="libvorbis")
+        ogg_data = ogg_buffer.getvalue()
+
+        return Response(ogg_data, media_type="audio/ogg")
+
+    except Exception as e:
+        print(f"TTS error: {e}")
+        raise HTTPException(status_code=500, detail="TTS generation failed")
