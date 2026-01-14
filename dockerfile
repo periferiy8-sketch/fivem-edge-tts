@@ -2,7 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Обязательно нужно git для установки из GitHub
 RUN apt-get update && apt-get install -y \
+    git \          # ← ДОБАВЬ ЭТО
     curl \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
