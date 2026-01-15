@@ -1,14 +1,12 @@
 from fastapi import FastAPI, Query, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import edge_tts
 import asyncio
-from pydub import AudioSegment
-import io
 
 app = FastAPI()
 
-# CORS — ОБЯЗАТЕЛЬНО для FiveM NUI
+# CORS — обязательно для FiveM NUI
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,7 +25,8 @@ async def tts(
     voice: str = Query("ru-RU-SvetlanaNeural"),
     rate: str = Query("-5%"),
     volume: str = Query("+0%"),
-    pitch: str = Query("+0Hz")
+    pitch: str = Query("+0Hz"),
+    mode: str = Query("buffer")  # ← НОВЫЙ ПАРАМЕТР
 ):
     allowed_voices = ["ru-RU-SvetlanaNeural", "ru-RU-DmitryNeural"]
     if voice not in allowed_voices:
@@ -36,7 +35,6 @@ async def tts(
         volume = "+0%"
 
     try:
-        mp3_buffer = io.BytesIO()
         communicate = edge_tts.Communicate(
             text=text,
             voice=voice,
@@ -44,21 +42,24 @@ async def tts(
             volume=volume,
             pitch=pitch
         )
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio" and chunk["data"]:
-                mp3_buffer.write(chunk["data"])
-        mp3_buffer.seek(0)
 
-        if mp3_buffer.getbuffer().nbytes == 0:
-            raise HTTPException(status_code=500, detail="Empty audio generated")
+        if mode == "stream":
+            # Режим 1: Streaming (быстро, без SSML)
+            async def audio_stream():
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio" and chunk["data"]:
+                        yield chunk["data"]
+            return StreamingResponse(audio_stream(), media_type="audio/mpeg")
 
-        # Конвертация в WAV (гарантированно совместимо)
-        audio = AudioSegment.from_file(mp3_buffer, format="mp3")
-        wav_buffer = io.BytesIO()
-        audio.export(wav_buffer, format="wav")
-        wav_data = wav_buffer.getvalue()
-
-        return Response(wav_data, media_type="audio/wav")
+        else:
+            # Режим 2: Buffer (медленнее, но с SSML)
+            audio_data = b""
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio" and chunk["data"]:
+                    audio_data += chunk["data"]
+            if len(audio_data) == 0:
+                raise HTTPException(status_code=500, detail="Empty audio generated")
+            return Response(audio_data, media_type="audio/mpeg")
 
     except Exception as e:
         print(f"TTS error: {e}")
