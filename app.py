@@ -15,23 +15,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# === ТЕСТОВЫЙ ЭНДПОИНТ: ПРОВЕРКА ВЕРСИИ ===
+# === ТЕСТОВЫЙ ЭНДПОИНТ ===
 @app.get("/test")
 async def test():
     return {
         "status": "updated",
-        "version": "2.0",
+        "version": "2.1",
         "ssml_support": True,
         "modes": ["stream", "buffer"],
-        "message": "Server is updated and ready for SSML!"
+        "message": "SSML auto-wrap and strip enabled!"
     }
 
-# === PING ДЛЯ UPTIMEROBOT ===
+# === PING ===
 @app.get("/ping")
 async def ping():
     return {"status": "ok", "message": "pong"}
 
-# === ОСНОВНОЙ TTS ЭНДПОИНТ ===
+# === TTS ===
 @app.get("/tts")
 async def tts(
     text: str = Query(..., max_length=500),
@@ -39,11 +39,10 @@ async def tts(
     rate: str = Query("-5%"),
     volume: str = Query("+0%"),
     pitch: str = Query("+0Hz"),
-    mode: str = Query("buffer")  # 'stream' или 'buffer'
+    mode: str = Query("buffer")
 ):
-    print(f"[TTS DEBUG] Received request: mode={mode}, voice={voice}")
-    print(f"[TTS DEBUG] Text preview: {text[:50]}...")
-
+    print(f"[TTS DEBUG] Received mode={mode}, text preview: {repr(text[:30])}")
+    
     allowed_voices = ["ru-RU-SvetlanaNeural", "ru-RU-DmitryNeural"]
     if voice not in allowed_voices:
         voice = "ru-RU-SvetlanaNeural"
@@ -51,8 +50,13 @@ async def tts(
         volume = "+0%"
 
     try:
+        # 🔹 ОЧИСТКА И АВТО-ОБЁРТКА В <speak>
+        clean_text = text.strip()
+        if clean_text.startswith("<") and not clean_text.startswith("<speak"):
+            clean_text = f"<speak>{clean_text}</speak>"
+
         communicate = edge_tts.Communicate(
-            text=text,
+            text=clean_text,
             voice=voice,
             rate=rate,
             volume=volume,
@@ -60,7 +64,6 @@ async def tts(
         )
 
         if mode == "stream":
-            print("[TTS DEBUG] Using STREAMING mode (no SSML)")
             async def audio_stream():
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio" and chunk["data"]:
@@ -68,7 +71,6 @@ async def tts(
             return StreamingResponse(audio_stream(), media_type="audio/mpeg")
 
         else:
-            print("[TTS DEBUG] Using BUFFER mode (SSML supported)")
             audio_data = b""
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio" and chunk["data"]:
