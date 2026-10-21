@@ -5,23 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import edge_tts
 import asyncio
 
-# === ПАТЧ ДЛЯ ОБХОДА 403 (новый адрес Microsoft) ===
-import edge_tts.communicate
-import edge_tts.constants
-
-edge_tts.constants.WSS_URL = "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1"
-
-_original_init = edge_tts.communicate.Communicate.__init__
-def _patched_init(self, *args, **kwargs):
-    _original_init(self, *args, **kwargs)
-    self._headers["Ocp-Apim-Subscription-Key"] = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
-    if "TrustedClientToken" in self._headers:
-        del self._headers["TrustedClientToken"]
-edge_tts.communicate.Communicate.__init__ = _patched_init
-# === КОНЕЦ ПАТЧА ===
-
 app = FastAPI()
 
+# CORS — обязательно для FiveM NUI
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -30,20 +16,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# === ТЕСТОВЫЙ ЭНДПОИНТ ===
 @app.get("/test")
 async def test():
     return {
         "status": "updated",
-        "version": "2.2",
+        "version": "2.3", # Обновил версию, чтобы вы видели, что код новый
         "ssml_support": True,
         "modes": ["stream", "buffer"],
-        "message": "Patched for new MS endpoint"
+        "message": "Clean code, edge-tts updated via requirements.txt"
     }
 
+# === PING ===
 @app.get("/ping")
 async def ping():
     return {"status": "ok", "message": "pong"}
 
+# === TTS ===
 @app.get("/tts")
 async def tts(
     text: str = Query(..., max_length=500),
@@ -54,7 +43,7 @@ async def tts(
     mode: str = Query("buffer")
 ):
     print(f"[TTS DEBUG] Received mode={mode}, text preview: {repr(text[:30])}")
-
+    
     allowed_voices = ["ru-RU-SvetlanaNeural", "ru-RU-DmitryNeural"]
     if voice not in allowed_voices:
         voice = "ru-RU-SvetlanaNeural"
@@ -62,6 +51,7 @@ async def tts(
         volume = "+0%"
 
     try:
+        # 🔹 ОЧИСТКА И АВТО-ОБЁРТКА В <speak>
         clean_text = text.strip()
         if clean_text.startswith("<") and not clean_text.startswith("<speak"):
             clean_text = f"<speak>{clean_text}</speak>"
@@ -80,6 +70,7 @@ async def tts(
                     if chunk["type"] == "audio" and chunk["data"]:
                         yield chunk["data"]
             return StreamingResponse(audio_stream(), media_type="audio/mpeg")
+
         else:
             audio_data = b""
             async for chunk in communicate.stream():
